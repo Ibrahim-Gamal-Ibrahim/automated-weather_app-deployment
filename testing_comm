@@ -1,0 +1,5 @@
+kubectl run curl-test \
+  --rm -it \
+  --restart=Never \
+  --image=curlimages/curl \
+  -- curl -v http://<service name : port >/<endpoint>

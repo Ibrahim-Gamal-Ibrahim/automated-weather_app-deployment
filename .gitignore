@@ -1,0 +1,91 @@
+# ============================================================
+# Secrets / Credentials
+# ============================================================
+
+# TLS private keys
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Kubernetes manifests containing real secrets
+kubernetes/authentication/secret.yml
+kubernetes/authentication/secret.yaml
+kubernetes/weather/secret.yaml
+
+# Environment / credential files
+.env
+.env.*
+!.env.example
+
+# ============================================================
+# Application-generated files
+# ============================================================
+
+# UI logs
+ui/requests.log
+
+# General logs
+*.log
+
+# ============================================================
+# Go
+# ============================================================
+
+# Compiled binaries
+auth/app
+auth/main/app
+auth/bin/
+
+# Go test/build artifacts
+*.test
+*.out
+
+# ============================================================
+# Node.js / UI
+# ============================================================
+
+ui/node_modules/
+ui/npm-debug.log*
+ui/yarn-debug.log*
+ui/yarn-error.log*
+
+# ============================================================
+# Python / Weather Service
+# ============================================================
+
+weather/__pycache__/
+weather/*.py[cod]
+weather/.pytest_cache/
+weather/.venv/
+weather/venv/
+
+# ============================================================
+# Kubernetes local/generated files
+# ============================================================
+
+*.kubeconfig
+
+# ============================================================
+# Jenkins local/generated files
+# ============================================================
+
+jenkins/.cache/
+jenkins/workspace/
+
+# ============================================================
+# IDE / Editor
+# ============================================================
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============================================================
+# Operating System
+# ============================================================
+
+.DS_Store
+Thumbs.db
