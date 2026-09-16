@@ -1,0 +1,341 @@
+```groovy
+pipeline {
+
+    agent {
+        label 'weatherapp-agent'
+    }
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
+    environment {
+        NAMESPACE = 'default'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                container('git') {
+                    git branch: 'main',
+                        url: 'https://github.com/Ibrahim-Gamal-Ibrahim/automated-weather_app-deployment.git'
+                }
+            }
+        }
+
+
+        stage('Create Kubernetes Secrets') {
+            steps {
+                container('kubectl') {
+
+                    withCredentials([
+
+                        string(
+                            credentialsId: 'mysql-root-password',
+                            variable: 'MYSQL_ROOT_PASSWORD'
+                        ),
+
+                        string(
+                            credentialsId: 'mysql-auth-password',
+                            variable: 'MYSQL_AUTH_PASSWORD'
+                        ),
+
+                        string(
+                            credentialsId: 'jwt-secret',
+                            variable: 'JWT_SECRET'
+                        ),
+
+                        string(
+                            credentialsId: 'weather-api-key',
+                            variable: 'WEATHER_API_KEY'
+                        ),
+
+                        file(
+                            credentialsId: 'weatherapp-tls-crt',
+                            variable: 'TLS_CRT'
+                        ),
+
+                        file(
+                            credentialsId: 'weatherapp-tls-key',
+                            variable: 'TLS_KEY'
+                        )
+                    ]) {
+
+                        sh '''
+
+                            kubectl create secret generic mysql-secret \
+                              --from-literal=root-password="$MYSQL_ROOT_PASSWORD" \
+                              --from-literal=auth-password="$MYSQL_AUTH_PASSWORD" \
+                              --dry-run=client \
+                              -o yaml | kubectl apply \
+                              -n ${NAMESPACE} \
+                              -f -
+
+
+                            kubectl create secret generic auth-secret \
+                              --from-literal=secret-key="$JWT_SECRET" \
+                              --dry-run=client \
+                              -o yaml | kubectl apply \
+                              -n ${NAMESPACE} \
+                              -f -
+
+
+                            kubectl create secret generic weather \
+                              --from-literal=apikey="$WEATHER_API_KEY" \
+                              --dry-run=client \
+                              -o yaml | kubectl apply \
+                              -n ${NAMESPACE} \
+                              -f -
+
+
+                            kubectl create secret tls weatherapp-ui-tls \
+                              --cert="$TLS_CRT" \
+                              --key="$TLS_KEY" \
+                              --dry-run=client \
+                              -o yaml | kubectl apply \
+                              -n ${NAMESPACE} \
+                              -f -
+                        '''
+                    }
+                }
+            }
+        }
+
+
+        stage('Deploy MySQL') {
+            steps {
+                container('kubectl') {
+
+                    sh '''
+                        kubectl apply \
+                          -f kubernetes/authentication/mysql/headless-service.yaml \
+                          -n ${NAMESPACE}
+
+                        kubectl apply \
+                          -f kubernetes/authentication/mysql/statefulset.yaml \
+                          -n ${NAMESPACE}
+                    '''
+                }
+            }
+        }
+
+
+        stage('Initialize Database') {
+            steps {
+                container('kubectl') {
+
+                    sh '''
+                        kubectl delete job mysql-init-job \
+                          -n ${NAMESPACE} \
+                          --ignore-not-found=true
+
+                        kubectl apply \
+                          -f kubernetes/authentication/mysql/init-job.yaml \
+                          -n ${NAMESPACE}
+
+                        kubectl wait \
+                          --for=condition=complete \
+                          job/mysql-init-job \
+                          -n ${NAMESPACE} \
+                          --timeout=120s
+                    '''
+                }
+            }
+        }
+
+
+        stage('Deploy Services') {
+            steps {
+                container('kubectl') {
+
+                    sh '''
+                        kubectl apply \
+                          -f kubernetes/authentication/service.yaml \
+                          -n ${NAMESPACE}
+
+                        kubectl apply \
+                          -f kubernetes/weather/service.yaml \
+                          -n ${NAMESPACE}
+
+                        kubectl apply \
+                          -f kubernetes/ui/service.yaml \
+                          -n ${NAMESPACE}
+                    '''
+                }
+            }
+        }
+
+
+        stage('Deploy Auth') {
+            steps {
+                container('kubectl') {
+
+                    sh '''
+                        if kubectl get deployment weatherapp-auth \
+                            -n ${NAMESPACE} >/dev/null 2>&1
+                        then
+                            EXISTED=true
+                        else
+                            EXISTED=false
+                        fi
+
+                        kubectl apply \
+                          -f kubernetes/authentication/deployment.yaml \
+                          -n ${NAMESPACE}
+
+                        if [ "$EXISTED" = "true" ]
+                        then
+                            kubectl rollout restart \
+                              deployment/weatherapp-auth \
+                              -n ${NAMESPACE}
+                        fi
+                    '''
+                }
+            }
+        }
+
+
+        stage('Deploy Weather') {
+            steps {
+                container('kubectl') {
+
+                    sh '''
+                        if kubectl get deployment weatherapp-weather \
+                            -n ${NAMESPACE} >/dev/null 2>&1
+                        then
+                            EXISTED=true
+                        else
+                            EXISTED=false
+                        fi
+
+                        kubectl apply \
+                          -f kubernetes/weather/deployment.yaml \
+                          -n ${NAMESPACE}
+
+                        if [ "$EXISTED" = "true" ]
+                        then
+                            kubectl rollout restart \
+                              deployment/weatherapp-weather \
+                              -n ${NAMESPACE}
+                        fi
+                    '''
+                }
+            }
+        }
+
+
+        stage('Deploy UI') {
+            steps {
+                container('kubectl') {
+
+                    sh '''
+                        if kubectl get deployment release-name-weatherapp-ui \
+                            -n ${NAMESPACE} >/dev/null 2>&1
+                        then
+                            EXISTED=true
+                        else
+                            EXISTED=false
+                        fi
+
+                        kubectl apply \
+                          -f kubernetes/ui/deployment.yaml \
+                          -n ${NAMESPACE}
+
+                        if [ "$EXISTED" = "true" ]
+                        then
+                            kubectl rollout restart \
+                              deployment/release-name-weatherapp-ui \
+                              -n ${NAMESPACE}
+                        fi
+                    '''
+                }
+            }
+        }
+
+
+        stage('Deploy Ingress') {
+            steps {
+                container('kubectl') {
+
+                    sh '''
+                        kubectl apply \
+                          -f kubernetes/ui/ingress.yaml \
+                          -n ${NAMESPACE}
+                    '''
+                }
+            }
+        }
+
+
+        stage('Verify Rollouts') {
+            steps {
+                container('kubectl') {
+
+                    sh '''
+                        kubectl rollout status \
+                          deployment/weatherapp-auth \
+                          -n ${NAMESPACE} \
+                          --timeout=180s
+
+                        kubectl rollout status \
+                          deployment/weatherapp-weather \
+                          -n ${NAMESPACE} \
+                          --timeout=180s
+
+                        kubectl rollout status \
+                          deployment/release-name-weatherapp-ui \
+                          -n ${NAMESPACE} \
+                          --timeout=180s
+                    '''
+                }
+            }
+        }
+
+
+        stage('Verify Application') {
+            steps {
+                container('kubectl') {
+
+                    sh '''
+                        echo "===== DEPLOYMENTS ====="
+                        kubectl get deployments -n ${NAMESPACE}
+
+                        echo ""
+                        echo "===== STATEFULSETS ====="
+                        kubectl get statefulsets -n ${NAMESPACE}
+
+                        echo ""
+                        echo "===== PODS ====="
+                        kubectl get pods -n ${NAMESPACE} -o wide
+
+                        echo ""
+                        echo "===== SERVICES ====="
+                        kubectl get services -n ${NAMESPACE}
+
+                        echo ""
+                        echo "===== INGRESS ====="
+                        kubectl get ingress -n ${NAMESPACE}
+                    '''
+                }
+            }
+        }
+    }
+
+
+    post {
+
+        success {
+            echo 'CD pipeline completed successfully.'
+        }
+
+        failure {
+            echo 'CD pipeline failed.'
+        }
+
+        always {
+            echo 'CD pipeline finished.'
+        }
+    }
+}
+```
