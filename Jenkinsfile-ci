@@ -115,8 +115,8 @@ EOF
                 echo 'CI succeeded. Triggering CD pipeline...'
 
                 build job: 'weatherapp-cd',
-                      wait: true,
-                      propagate: true
+                      wait: false,
+                      propagate: false
             }
         }
     }

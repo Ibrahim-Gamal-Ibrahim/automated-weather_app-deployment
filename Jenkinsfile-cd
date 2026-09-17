@@ -126,10 +126,7 @@ pipeline {
                 container('kubectl') {
 
                     sh '''
-                        kubectl delete job mysql-init-job \
-                          -n ${NAMESPACE} \
-                          --ignore-not-found=true
-
+                        
                         kubectl apply \
                           -f kubernetes/authentication/mysql/init-job.yaml \
                           -n ${NAMESPACE}
