@@ -8,13 +8,42 @@ spec:
       type: Unconfined
 
   containers:
+
     - name: git
       image: alpine/git:latest
       command:
         - cat
       tty: true
 
-    - name: buildkit
+    - name: buildkit-auth
+      image: moby/buildkit:rootless
+      command:
+        - sh
+        - -c
+        - cat
+      tty: true
+      env:
+        - name: BUILDKITD_FLAGS
+          value: --oci-worker-no-process-sandbox
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+
+    - name: buildkit-ui
+      image: moby/buildkit:rootless
+      command:
+        - sh
+        - -c
+        - cat
+      tty: true
+      env:
+        - name: BUILDKITD_FLAGS
+          value: --oci-worker-no-process-sandbox
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+
+    - name: buildkit-weather
       image: moby/buildkit:rootless
       command:
         - sh
@@ -33,3 +62,4 @@ spec:
       command:
         - cat
       tty: true
+      

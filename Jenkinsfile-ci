@@ -11,9 +11,14 @@ pipeline {
 
     environment {
         DOCKERHUB_USER = 'ibrahimgamal10203040'
+        DOCKER_CONFIG  = '/home/jenkins/agent/.docker'
     }
 
     stages {
+
+        // =========================================================
+        // 1. CHECKOUT
+        // =========================================================
 
         stage('Checkout') {
             steps {
@@ -25,9 +30,13 @@ pipeline {
         }
 
 
+        // =========================================================
+        // 2. PREPARE DOCKER HUB AUTHENTICATION
+        // =========================================================
+
         stage('Prepare Docker Auth') {
             steps {
-                container('buildkit') {
+                container('buildkit-auth') {
 
                     withCredentials([
                         usernamePassword(
@@ -38,12 +47,14 @@ pipeline {
                     ]) {
 
                         sh '''
-                            mkdir -p ~/.docker
+                            echo "Preparing Docker Hub authentication..."
+
+                            mkdir -p ${DOCKER_CONFIG}
 
                             AUTH=$(printf "%s:%s" "$DOCKER_USER" "$DOCKER_PASS" \
                                 | base64 | tr -d '\\n')
 
-                            cat > ~/.docker/config.json <<EOF
+                            cat > ${DOCKER_CONFIG}/config.json <<EOF
 {
   "auths": {
     "https://index.docker.io/v1/": {
@@ -59,59 +70,95 @@ EOF
         }
 
 
-        stage('Build Auth') {
-            steps {
-                container('buildkit') {
-                    sh '''
-                        echo "Building Auth image..."
+        // =========================================================
+        // 3. BUILD ALL IMAGES IN PARALLEL
+        // =========================================================
 
-                        buildctl-daemonless.sh build \
-                          --frontend dockerfile.v0 \
-                          --local context=auth \
-                          --local dockerfile=auth \
-                          --output type=image,name=${DOCKERHUB_USER}/weatherapp-auth:latest,push=true
-                    '''
+        stage('Build Images') {
+
+            parallel {
+
+                // -------------------------------------------------
+                // AUTH
+                // -------------------------------------------------
+
+                stage('Build Auth') {
+                    steps {
+                        container('buildkit-auth') {
+
+                            sh '''
+                                echo "Building Auth image..."
+
+                                export DOCKER_CONFIG=${DOCKER_CONFIG}
+
+                                buildctl-daemonless.sh build \
+                                  --frontend dockerfile.v0 \
+                                  --local context=auth \
+                                  --local dockerfile=auth \
+                                  --output type=image,name=${DOCKERHUB_USER}/weatherapp-auth:latest,push=true
+                            '''
+                        }
+                    }
+                }
+
+
+                // -------------------------------------------------
+                // UI
+                // -------------------------------------------------
+
+                stage('Build UI') {
+                    steps {
+                        container('buildkit-ui') {
+
+                            sh '''
+                                echo "Building UI image..."
+
+                                export DOCKER_CONFIG=${DOCKER_CONFIG}
+
+                                buildctl-daemonless.sh build \
+                                  --frontend dockerfile.v0 \
+                                  --local context=ui \
+                                  --local dockerfile=ui \
+                                  --output type=image,name=${DOCKERHUB_USER}/weatherapp-ui:latest,push=true
+                            '''
+                        }
+                    }
+                }
+
+
+                // -------------------------------------------------
+                // WEATHER
+                // -------------------------------------------------
+
+                stage('Build Weather') {
+                    steps {
+                        container('buildkit-weather') {
+
+                            sh '''
+                                echo "Building Weather image..."
+
+                                export DOCKER_CONFIG=${DOCKER_CONFIG}
+
+                                buildctl-daemonless.sh build \
+                                  --frontend dockerfile.v0 \
+                                  --local context=weather \
+                                  --local dockerfile=weather \
+                                  --output type=image,name=${DOCKERHUB_USER}/weatherapp-weather:latest,push=true
+                            '''
+                        }
+                    }
                 }
             }
         }
 
 
-        stage('Build UI') {
-            steps {
-                container('buildkit') {
-                    sh '''
-                        echo "Building UI image..."
-
-                        buildctl-daemonless.sh build \
-                          --frontend dockerfile.v0 \
-                          --local context=ui \
-                          --local dockerfile=ui \
-                          --output type=image,name=${DOCKERHUB_USER}/weatherapp-ui:latest,push=true
-                    '''
-                }
-            }
-        }
-
-
-        stage('Build Weather') {
-            steps {
-                container('buildkit') {
-                    sh '''
-                        echo "Building Weather image..."
-
-                        buildctl-daemonless.sh build \
-                          --frontend dockerfile.v0 \
-                          --local context=weather \
-                          --local dockerfile=weather \
-                          --output type=image,name=${DOCKERHUB_USER}/weatherapp-weather:latest,push=true
-                    '''
-                }
-            }
-        }
-
+        // =========================================================
+        // 4. TRIGGER CD PIPELINE
+        // =========================================================
 
         stage('Trigger CD') {
             steps {
+
                 echo 'CI succeeded. Triggering CD pipeline...'
 
                 build job: 'weatherapp-cd',
@@ -122,14 +169,28 @@ EOF
     }
 
 
+    // =============================================================
+    // PIPELINE RESULT
+    // =============================================================
+
     post {
 
         success {
-            echo 'CI pipeline completed successfully.'
+            echo '''
+================================================
+ CI PIPELINE COMPLETED SUCCESSFULLY
+ CD PIPELINE WAS TRIGGERED
+================================================
+'''
         }
 
         failure {
-            echo 'CI pipeline failed. CD was not triggered successfully.'
+            echo '''
+================================================
+ CI PIPELINE FAILED
+ CD PIPELINE WILL NOT CONTINUE SUCCESSFULLY
+================================================
+'''
         }
 
         always {
