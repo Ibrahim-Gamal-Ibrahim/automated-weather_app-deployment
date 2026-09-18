@@ -49,7 +49,7 @@ rules:
       - create
       - update
       - patch
-
+      
   - apiGroups: ["networking.k8s.io"]
     resources:
       - ingresses
